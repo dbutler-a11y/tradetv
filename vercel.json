@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/monitor/poll",
+      "schedule": "*/5 9-16 * * 1-5"
+    }
+  ]
+}
