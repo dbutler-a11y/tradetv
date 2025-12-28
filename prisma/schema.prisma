@@ -1,0 +1,543 @@
+// TradeTV Database Schema
+// Live Trading Social Platform
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// USER & AUTH
+// ============================================
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  emailVerified DateTime?
+  name          String?
+  image         String?
+  role          Role      @default(MEMBER)
+
+  // Subscription
+  subscriptionTier     SubscriptionTier @default(FREE)
+  subscriptionStatus   String?
+  paypalSubscriptionId String?          @unique
+  paypalPayerId        String?          @unique
+
+  // Trading
+  tradovateLinked Boolean @default(false)
+
+  // Auth relations
+  accounts Account[]
+  sessions Session[]
+
+  // Platform relations
+  trader          Trader?
+  bots            Bot[]
+  following       Follow[]         @relation("follower")
+  followers       Follow[]         @relation("followed")
+  challenges      Challenge[]
+  payouts         Payout[]
+  coachingSessions CoachingSession[] @relation("student")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ============================================
+// TRADER PROFILES
+// ============================================
+
+model Trader {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Profile
+  displayName      String
+  bio              String?
+  avatarUrl        String?
+  bannerUrl        String?
+  streamUrl        String?
+  verificationTier VerificationTier @default(UNVERIFIED)
+
+  // Performance (cached, updated periodically)
+  winRate      Float @default(0)
+  profitFactor Float @default(0)
+  avgTrade     Float @default(0)
+  monthlyPnl   Float @default(0)
+  totalTrades  Int   @default(0)
+  maxDrawdown  Float @default(0)
+
+  // Trading style
+  instruments String[]
+  timeframes  String[]
+  style       String?
+  riskLevel   RiskLevel @default(MODERATE)
+
+  // Schedule
+  tradingSchedule Json?
+
+  // Relations
+  signals          Signal[]
+  copiers          BotTrader[]
+  streams          Stream[]
+  coachingSessions CoachingSession[] @relation("coach")
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Follow {
+  id         String @id @default(cuid())
+  followerId String
+  followedId String
+
+  follower User @relation("follower", fields: [followerId], references: [id], onDelete: Cascade)
+  followed User @relation("followed", fields: [followedId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([followerId, followedId])
+}
+
+// ============================================
+// STREAMING
+// ============================================
+
+model Stream {
+  id       String @id @default(cuid())
+  traderId String
+  trader   Trader @relation(fields: [traderId], references: [id], onDelete: Cascade)
+
+  platform     StreamPlatform
+  externalId   String?
+  url          String
+  title        String?
+  thumbnailUrl String?
+
+  isLive       Boolean  @default(false)
+  viewerCount  Int      @default(0)
+  startedAt    DateTime?
+  endedAt      DateTime?
+
+  // Category
+  category    String?
+  instruments String[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([platform, externalId])
+}
+
+// ============================================
+// COPY TRADING BOTS
+// ============================================
+
+model Bot {
+  id       String  @id @default(cuid())
+  userId   String
+  user     User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name     String
+  isActive Boolean @default(false)
+
+  // Risk controls
+  maxPositionSize   Int      @default(1)
+  maxDailyLoss      Float    @default(500)
+  maxDailyTrades    Int      @default(10)
+  allowedSymbols    String[]
+  tradingHoursStart String?
+  tradingHoursEnd   String?
+  tradingTimezone   String   @default("America/New_York")
+
+  // Trade modifiers
+  stopLossMode    StopLossMode   @default(TRADER)
+  stopLossValue   Float?
+  takeProfitMode  TakeProfitMode @default(TRADER)
+  takeProfitValue Float?
+  scaleMultiplier Float          @default(1.0)
+
+  // Filters
+  minTraderWinRate     Float?
+  requireConfirmation  Boolean @default(false)
+  maxConcurrentTrades  Int     @default(5)
+
+  // Performance tracking
+  totalPnl       Float @default(0)
+  totalTrades    Int   @default(0)
+  winningTrades  Int   @default(0)
+  losingTrades   Int   @default(0)
+
+  // Relations
+  traders BotTrader[]
+  trades  Trade[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model BotTrader {
+  id       String @id @default(cuid())
+  botId    String
+  bot      Bot    @relation(fields: [botId], references: [id], onDelete: Cascade)
+  traderId String
+  trader   Trader @relation(fields: [traderId], references: [id], onDelete: Cascade)
+
+  weight     Int     @default(100) // 0-100 allocation percentage
+  delay      Int     @default(0)   // seconds delay before copying
+  copyLongs  Boolean @default(true)
+  copyShorts Boolean @default(true)
+  copyScales Boolean @default(true)
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([botId, traderId])
+}
+
+// ============================================
+// SIGNALS & TRADES
+// ============================================
+
+model Signal {
+  id       String @id @default(cuid())
+  traderId String
+  trader   Trader @relation(fields: [traderId], references: [id], onDelete: Cascade)
+
+  action   SignalAction
+  symbol   String
+  price    Float?
+  quantity Int?
+  note     String?
+
+  // For tracking closed signals
+  status      SignalStatus @default(ACTIVE)
+  closedAt    DateTime?
+  closedPrice Float?
+  pnl         Float?
+
+  // Relations
+  trades Trade[]
+
+  createdAt DateTime @default(now())
+
+  @@index([traderId, createdAt])
+  @@index([symbol, createdAt])
+}
+
+model Trade {
+  id       String  @id @default(cuid())
+  botId    String
+  bot      Bot     @relation(fields: [botId], references: [id], onDelete: Cascade)
+  signalId String?
+  signal   Signal? @relation(fields: [signalId], references: [id])
+
+  symbol     String
+  direction  Direction
+  quantity   Int
+  entryPrice Float
+  exitPrice  Float?
+  pnl        Float?
+
+  // Execution details
+  brokerOrderId String?
+  status        TradeStatus @default(PENDING)
+  errorMessage  String?
+
+  enteredAt DateTime  @default(now())
+  exitedAt  DateTime?
+
+  @@index([botId, enteredAt])
+}
+
+// ============================================
+// PROP FIRM CHALLENGES
+// ============================================
+
+model Challenge {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Challenge details
+  tier          ChallengeTier
+  accountSize   Float
+  profitTarget  Float
+  maxDrawdown   Float
+  dailyLossLimit Float
+
+  // Payment
+  price            Float
+  stripePaymentId  String?
+
+  // Progress
+  currentBalance   Float        @default(0)
+  currentPnl       Float        @default(0)
+  peakBalance      Float        @default(0)
+  status           ChallengeStatus @default(PENDING)
+
+  // Dates
+  purchasedAt DateTime  @default(now())
+  startedAt   DateTime?
+  completedAt DateTime?
+  expiresAt   DateTime?
+
+  @@index([userId, status])
+}
+
+// ============================================
+// PAYMENTS & PAYOUTS
+// ============================================
+
+model Payout {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  grossAmount Float
+  platformFee Float // 1% of gross
+  netAmount   Float
+
+  // Stripe details
+  stripeTransferId String?
+  status           PayoutStatus @default(PENDING)
+
+  processedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([userId, status])
+}
+
+model Subscription {
+  id               String           @id @default(cuid())
+  userId           String           @unique
+  tier             SubscriptionTier
+  stripeSubId      String?          @unique
+  stripePriceId    String?
+  status           String           @default("active")
+  currentPeriodEnd DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ============================================
+// COACHING & EDUCATION
+// ============================================
+
+model CoachingSession {
+  id        String @id @default(cuid())
+  coachId   String
+  coach     Trader @relation("coach", fields: [coachId], references: [id])
+  studentId String
+  student   User   @relation("student", fields: [studentId], references: [id])
+
+  title       String
+  description String?
+  duration    Int // minutes
+  price       Float
+
+  scheduledAt DateTime
+  status      SessionStatus @default(SCHEDULED)
+
+  meetingUrl  String?
+  notes       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([coachId, scheduledAt])
+  @@index([studentId, scheduledAt])
+}
+
+model Course {
+  id          String @id @default(cuid())
+  title       String
+  description String?
+  thumbnailUrl String?
+
+  tier        SubscriptionTier @default(FREE) // Required tier to access
+  duration    Int? // total minutes
+
+  lessons     Lesson[]
+
+  isPublished Boolean @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Lesson {
+  id          String @id @default(cuid())
+  courseId    String
+  course      Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  title       String
+  description String?
+  videoUrl    String?
+  duration    Int? // minutes
+  order       Int
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([courseId, order])
+}
+
+// ============================================
+// ENUMS
+// ============================================
+
+enum Role {
+  MEMBER
+  TRADER
+  COACH
+  ADMIN
+}
+
+enum SubscriptionTier {
+  FREE
+  STARTER
+  PRO
+  ELITE
+}
+
+enum VerificationTier {
+  UNVERIFIED
+  VERIFIED
+  PRO
+  ELITE
+}
+
+enum RiskLevel {
+  LOW
+  MODERATE
+  HIGH
+  AGGRESSIVE
+}
+
+enum StreamPlatform {
+  YOUTUBE
+  TWITCH
+  CUSTOM
+}
+
+enum SignalAction {
+  LONG
+  SHORT
+  EXIT_LONG
+  EXIT_SHORT
+  EXIT_ALL
+  SCALE_IN
+  SCALE_OUT
+  STOP_MOVED
+}
+
+enum SignalStatus {
+  ACTIVE
+  CLOSED
+  CANCELLED
+}
+
+enum Direction {
+  LONG
+  SHORT
+}
+
+enum TradeStatus {
+  PENDING
+  SUBMITTED
+  FILLED
+  PARTIAL
+  CLOSED
+  CANCELLED
+  FAILED
+}
+
+enum StopLossMode {
+  TRADER
+  FIXED
+  PERCENTAGE
+  NONE
+}
+
+enum TakeProfitMode {
+  TRADER
+  FIXED
+  PERCENTAGE
+  NONE
+}
+
+enum ChallengeTier {
+  STARTER_25K
+  STANDARD_50K
+  PRO_100K
+  ELITE_150K
+  MASTER_200K
+}
+
+enum ChallengeStatus {
+  PENDING
+  ACTIVE
+  PASSED
+  FAILED
+  FUNDED
+  EXPIRED
+}
+
+enum PayoutStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum SessionStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
