@@ -60,8 +60,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get channel info
-    const channel = MONITORED_CHANNELS.find((c) => c.id === channelId);
+    // Get channel info - allow "manual" for ad-hoc analysis
+    let channel = MONITORED_CHANNELS.find((c) => c.id === channelId);
+    if (!channel && channelId === "manual") {
+      // Create a temporary channel for manual analysis
+      channel = {
+        id: "manual",
+        name: "Manual Analysis",
+        youtubeHandle: "@manual",
+        platform: "unknown" as const,
+        isLive: true,
+      };
+    }
     if (!channel) {
       return NextResponse.json({ error: "Channel not found" }, { status: 404 });
     }
