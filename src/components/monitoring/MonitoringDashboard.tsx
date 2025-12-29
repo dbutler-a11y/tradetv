@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Eye,
   EyeOff,
@@ -15,6 +16,9 @@ import {
   BarChart3,
   ArrowUp,
   ArrowDown,
+  Plus,
+  Loader2,
+  ExternalLink,
 } from "lucide-react";
 
 interface MonitoredChannel {
@@ -70,6 +74,16 @@ export function MonitoringDashboard() {
   const [stats, setStats] = useState<ChannelStats | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [lastPoll, setLastPoll] = useState<Date | null>(null);
+
+  // Quick analyze state
+  const [quickUrl, setQuickUrl] = useState("");
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [quickResult, setQuickResult] = useState<{
+    success: boolean;
+    message: string;
+    positions?: Position[];
+    streamId?: string;
+  } | null>(null);
 
   const fetchChannels = async () => {
     try {
@@ -136,6 +150,75 @@ export function MonitoringDashboard() {
       }
     } catch (error) {
       console.error("Analysis failed:", error);
+    }
+  };
+
+  // Extract video ID from YouTube URL
+  const extractVideoId = (url: string): string | null => {
+    const patterns = [
+      /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/live\/)([a-zA-Z0-9_-]{11})/,
+      /^([a-zA-Z0-9_-]{11})$/, // Just the ID
+    ];
+    for (const pattern of patterns) {
+      const match = url.match(pattern);
+      if (match) return match[1];
+    }
+    return null;
+  };
+
+  // Quick analyze any YouTube stream
+  const analyzeQuickStream = async () => {
+    const videoId = extractVideoId(quickUrl.trim());
+    if (!videoId) {
+      setQuickResult({
+        success: false,
+        message: "Invalid YouTube URL. Paste a link like: youtube.com/watch?v=abc123",
+      });
+      return;
+    }
+
+    setIsAnalyzing(true);
+    setQuickResult(null);
+
+    try {
+      const res = await fetch("/api/monitor/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ streamId: videoId, channelId: "manual" }),
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        setQuickResult({
+          success: true,
+          message: `Analyzed! Found ${data.positions?.length || 0} positions.`,
+          positions: data.positions,
+          streamId: videoId,
+        });
+
+        // Add to positions state
+        if (data.positions?.length > 0) {
+          setPositions((prev) => ({
+            ...prev,
+            [videoId]: data.positions,
+          }));
+        }
+
+        // Refresh trades
+        await fetchTrades();
+      } else {
+        setQuickResult({
+          success: false,
+          message: data.error || "Analysis failed",
+        });
+      }
+    } catch (error) {
+      setQuickResult({
+        success: false,
+        message: "Failed to analyze stream",
+      });
+    } finally {
+      setIsAnalyzing(false);
     }
   };
 
@@ -241,6 +324,102 @@ export function MonitoringDashboard() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Quick Analyze */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Plus className="h-5 w-5" />
+            Analyze Any Live Stream
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex gap-2">
+            <Input
+              placeholder="Paste YouTube URL (e.g., youtube.com/watch?v=abc123)"
+              value={quickUrl}
+              onChange={(e) => setQuickUrl(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && analyzeQuickStream()}
+              className="flex-1"
+            />
+            <Button onClick={analyzeQuickStream} disabled={isAnalyzing || !quickUrl.trim()}>
+              {isAnalyzing ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                "Analyze"
+              )}
+            </Button>
+          </div>
+
+          {quickResult && (
+            <div
+              className={`mt-4 p-4 rounded-lg ${
+                quickResult.success
+                  ? "bg-green-50 border border-green-200"
+                  : "bg-red-50 border border-red-200"
+              }`}
+            >
+              <p
+                className={`font-medium ${
+                  quickResult.success ? "text-green-800" : "text-red-800"
+                }`}
+              >
+                {quickResult.message}
+              </p>
+
+              {quickResult.success && quickResult.streamId && (
+                <div className="mt-2 flex items-center gap-4">
+                  <a
+                    href={`https://youtube.com/watch?v=${quickResult.streamId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm text-blue-600 hover:underline flex items-center gap-1"
+                  >
+                    Watch Stream <ExternalLink className="h-3 w-3" />
+                  </a>
+                </div>
+              )}
+
+              {quickResult.positions && quickResult.positions.length > 0 && (
+                <div className="mt-3 space-y-2">
+                  <p className="text-sm font-medium">Detected Positions:</p>
+                  {quickResult.positions.map((pos, i) => (
+                    <div
+                      key={i}
+                      className="flex items-center justify-between text-sm bg-white p-2 rounded border"
+                    >
+                      <span className="flex items-center gap-2">
+                        {pos.direction === "LONG" ? (
+                          <ArrowUp className="h-4 w-4 text-green-500" />
+                        ) : (
+                          <ArrowDown className="h-4 w-4 text-red-500" />
+                        )}
+                        <span className="font-mono font-medium">
+                          {pos.size} {pos.symbol}
+                        </span>
+                        <span className="text-muted-foreground">
+                          @ ${pos.entryPrice?.toFixed(2)}
+                        </span>
+                      </span>
+                      {pos.unrealizedPnl !== undefined && (
+                        <span
+                          className={`font-mono ${
+                            pos.unrealizedPnl >= 0
+                              ? "text-green-600"
+                              : "text-red-600"
+                          }`}
+                        >
+                          ${pos.unrealizedPnl.toFixed(2)}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Monitored Channels */}
       <Card>
