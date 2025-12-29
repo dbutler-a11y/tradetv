@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, use } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -32,11 +32,11 @@ const demoSignals = [
 
 
 interface WatchPageProps {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }
 
 export default function WatchPage({ params }: WatchPageProps) {
-  const { id } = params;
+  const { id } = use(params);
   const [isMuted, setIsMuted] = useState(true);
   const [isFollowing, setIsFollowing] = useState(false);
   const [viewerCount, setViewerCount] = useState(2847);
