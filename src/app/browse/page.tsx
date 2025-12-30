@@ -1,6 +1,7 @@
+import Link from "next/link";
 import { StreamGrid } from "@/components/streams/StreamGrid";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { TrendingUp, Clock, Star, Users } from "lucide-react";
+import { TrendingUp, Clock, Star, Radio } from "lucide-react";
 
 export const metadata = {
   title: "Browse Traders - TradeTV",
@@ -71,6 +72,27 @@ export default function BrowsePage() {
           />
         </TabsContent>
       </Tabs>
+
+      {/* Monitored Channels Link */}
+      <div className="mt-12 pt-8 border-t">
+        <Link
+          href="/monitoring"
+          className="flex items-center gap-3 p-4 rounded-lg bg-card border hover:bg-accent transition-colors group"
+        >
+          <div className="p-2 rounded-full bg-primary/10 text-primary">
+            <Radio className="w-5 h-5" />
+          </div>
+          <div className="flex-1">
+            <h3 className="font-semibold group-hover:text-primary transition-colors">
+              Monitored Channels
+            </h3>
+            <p className="text-sm text-muted-foreground">
+              View tracked traders and analyze their live streams
+            </p>
+          </div>
+          <span className="text-muted-foreground group-hover:text-primary transition-colors">→</span>
+        </Link>
+      </div>
     </div>
   );
 }

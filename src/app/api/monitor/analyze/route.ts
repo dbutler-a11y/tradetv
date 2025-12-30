@@ -13,6 +13,16 @@ import {
 } from "@/lib/signals/signal-correlator";
 import { MONITORED_CHANNELS } from "@/lib/youtube/channel-monitor";
 
+// Timeout wrapper for async functions
+function withTimeout<T>(promise: Promise<T>, ms: number, errorMsg: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(errorMsg)), ms)
+    ),
+  ]);
+}
+
 /**
  * In-memory cache for previous positions per stream
  * In production, this would be Redis or a database
@@ -101,14 +111,30 @@ export async function POST(request: NextRequest) {
         : analysisImageUrl;
 
       if (imageSource) {
-        analysis = await analyzeWithFreeOCR(imageSource, {
-          platformHint: channel.platform as
-            | "tradovate"
-            | "ninjatrader"
-            | "tradingview"
-            | "thinkorswim"
-            | undefined,
-        });
+        try {
+          // Wrap OCR in timeout (30 seconds max for first-time init)
+          analysis = await withTimeout(
+            analyzeWithFreeOCR(imageSource, {
+              platformHint: channel.platform as
+                | "tradovate"
+                | "ninjatrader"
+                | "tradingview"
+                | "thinkorswim"
+                | undefined,
+            }),
+            30000,
+            "OCR analysis timed out (30s). Try again - subsequent calls are faster."
+          );
+        } catch (ocrError) {
+          console.error("OCR error:", ocrError);
+          analysis = {
+            platform: "unknown" as const,
+            confidence: 0,
+            timestamp: new Date(),
+            positions: [],
+            error: ocrError instanceof Error ? ocrError.message : "OCR failed",
+          };
+        }
       } else {
         analysis = {
           platform: "unknown" as const,

@@ -4,6 +4,11 @@ import { youtube } from "@/lib/youtube/client";
 /**
  * GET /api/youtube/video/[id]
  * Get video details by ID
+ *
+ * Returns flat object with video info for watch page:
+ * - title, channelTitle, channelId, isLive, viewerCount, etc.
+ *
+ * Quota: 1 unit (videos.list)
  */
 export async function GET(
   request: NextRequest,
@@ -28,7 +33,20 @@ export async function GET(
       );
     }
 
-    return NextResponse.json({ video });
+    // Return flat object for watch page consumption
+    return NextResponse.json({
+      videoId: video.id,
+      title: video.title,
+      description: video.description,
+      channelId: video.channelId,
+      channelTitle: video.channelTitle,
+      thumbnailUrl: video.thumbnailUrl,
+      publishedAt: video.publishedAt,
+      isLive: video.liveBroadcastContent === "live",
+      liveBroadcastContent: video.liveBroadcastContent,
+      viewerCount: video.viewCount || 0,
+      likeCount: video.likeCount || 0,
+    });
   } catch (error: any) {
     console.error("YouTube video fetch error:", error);
     return NextResponse.json(

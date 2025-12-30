@@ -473,7 +473,7 @@ export function MonitoringDashboard() {
                       <div className="mt-3 space-y-2">
                         <p className="text-sm truncate">{liveStream.title}</p>
                         <p className="text-xs text-muted-foreground">
-                          {liveStream.viewers.toLocaleString()} viewers
+                          {((liveStream as any).viewers || (liveStream as any).viewerCount || 0).toLocaleString()} viewers
                         </p>
 
                         <Button

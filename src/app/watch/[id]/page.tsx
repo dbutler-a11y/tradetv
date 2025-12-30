@@ -7,6 +7,7 @@ import {
   Copy,
   Eye,
   Heart,
+  Loader2,
   MoreVertical,
   Share2,
   TrendingUp,
@@ -19,7 +20,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import { StreamChat } from "@/components/chat/StreamChat";
+import { YouTubeChat } from "@/components/chat/YouTubeChat";
+import { SpeechRecognitionPanel } from "@/components/audio/SpeechRecognition";
 
 // Demo signals for the sidebar
 const demoSignals = [
@@ -30,6 +32,14 @@ const demoSignals = [
   { id: "5", action: "EXIT", symbol: "NQ", price: 21380, time: "25 min ago", pnl: 180 },
 ];
 
+interface VideoInfo {
+  title: string;
+  channelTitle: string;
+  channelId: string;
+  thumbnailUrl?: string;
+  viewerCount: number;
+  isLive: boolean;
+}
 
 interface WatchPageProps {
   params: Promise<{ id: string }>;
@@ -39,18 +49,46 @@ export default function WatchPage({ params }: WatchPageProps) {
   const { id } = use(params);
   const [isMuted, setIsMuted] = useState(true);
   const [isFollowing, setIsFollowing] = useState(false);
-  const [viewerCount, setViewerCount] = useState(2847);
+  const [videoInfo, setVideoInfo] = useState<VideoInfo | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [viewerCount, setViewerCount] = useState(0);
 
   // Check if it's a YouTube video ID (11 characters)
   const isYouTubeId = id.length === 11 && /^[a-zA-Z0-9_-]+$/.test(id);
 
-  // Simulate viewer count changes
+  // Fetch real video info from YouTube
   useEffect(() => {
+    async function fetchVideoInfo() {
+      if (!isYouTubeId) {
+        setIsLoading(false);
+        return;
+      }
+
+      try {
+        const res = await fetch(`/api/youtube/video/${id}`);
+        if (res.ok) {
+          const data = await res.json();
+          setVideoInfo(data);
+          setViewerCount(data.viewerCount || 0);
+        }
+      } catch (error) {
+        console.error("Failed to fetch video info:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    fetchVideoInfo();
+  }, [id, isYouTubeId]);
+
+  // Simulate viewer count changes (small fluctuations around real count)
+  useEffect(() => {
+    if (viewerCount === 0) return;
     const interval = setInterval(() => {
-      setViewerCount((prev) => prev + Math.floor(Math.random() * 10) - 4);
+      setViewerCount((prev) => Math.max(0, prev + Math.floor(Math.random() * 10) - 4));
     }, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [viewerCount > 0]);
 
   // Calculate today's P&L from signals
   const todayPnl = demoSignals.reduce((sum, signal) => sum + (signal.pnl || 0), 0);
@@ -145,20 +183,35 @@ export default function WatchPage({ params }: WatchPageProps) {
               <Avatar className="w-12 h-12 border-2 border-background">
                 <AvatarImage src={undefined} />
                 <AvatarFallback className="bg-primary text-primary-foreground">
-                  TM
+                  {videoInfo?.channelTitle?.slice(0, 2).toUpperCase() || "YT"}
                 </AvatarFallback>
               </Avatar>
 
               <div className="flex-1">
-                <h1 className="text-xl font-bold">
-                  ES Scalping - NY Session Live
-                </h1>
-                <div className="flex items-center gap-2 mt-1">
-                  <Link href="/trader/trader-1" className="text-muted-foreground hover:text-foreground">
-                    TopTrader_Mike
-                  </Link>
-                  <Badge variant="secondary" className="text-xs">Elite</Badge>
-                </div>
+                {isLoading ? (
+                  <div className="flex items-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span className="text-muted-foreground">Loading stream info...</span>
+                  </div>
+                ) : (
+                  <>
+                    <h1 className="text-xl font-bold">
+                      {videoInfo?.title || "Live Trading Stream"}
+                    </h1>
+                    <div className="flex items-center gap-2 mt-1">
+                      <Link
+                        href={videoInfo?.channelId ? `https://youtube.com/channel/${videoInfo.channelId}` : "#"}
+                        target="_blank"
+                        className="text-muted-foreground hover:text-foreground"
+                      >
+                        {videoInfo?.channelTitle || "Unknown Channel"}
+                      </Link>
+                      {videoInfo?.isLive && (
+                        <Badge variant="destructive" className="text-xs">LIVE</Badge>
+                      )}
+                    </div>
+                  </>
+                )}
               </div>
 
               <div className="flex items-center gap-2">
@@ -267,20 +320,24 @@ export default function WatchPage({ params }: WatchPageProps) {
               </CardContent>
             </Card>
 
-            {/* Chat */}
-            <div className="h-[450px]">
-              <StreamChat
-                streamId={id}
-                viewerCount={viewerCount}
-                traderName="TopTrader_Mike"
-              />
-            </div>
+            {/* YouTube-style Chat */}
+            <YouTubeChat
+              videoId={id}
+              className="h-[350px]"
+            />
+
+            {/* Voice Recognition */}
+            <SpeechRecognitionPanel
+              onSignalDetected={(signal) => {
+                console.log("Voice signal detected:", signal);
+              }}
+            />
 
             {/* Copy CTA */}
             <Card className="border-primary">
               <CardContent className="pt-4">
                 <p className="text-sm mb-3">
-                  Copy TopTrader_Mike's trades automatically to your account.
+                  Copy {videoInfo?.channelTitle || "this trader"}'s trades automatically to your account.
                 </p>
                 <Button className="w-full gap-2">
                   <Copy className="w-4 h-4" />

@@ -17,6 +17,7 @@ import {
   Settings,
   LogOut,
   ChevronDown,
+  Activity,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,6 +35,7 @@ import { ScheduleCallButton } from "@/components/cta/ScheduleCallButton";
 
 const navigation = [
   { name: "Browse", href: "/browse", icon: Radio },
+  { name: "Monitoring", href: "/monitoring", icon: Activity },
   { name: "Following", href: "/following", icon: Users },
   { name: "My Bot", href: "/bot", icon: Bot },
   { name: "Learn", href: "/learn", icon: GraduationCap },

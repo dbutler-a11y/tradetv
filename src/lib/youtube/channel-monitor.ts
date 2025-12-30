@@ -46,6 +46,13 @@ export interface LiveStreamInfo {
 // Channels to monitor - stored in database in production
 export const MONITORED_CHANNELS: MonitoredChannel[] = [
   {
+    id: "rocket-scooter-ai",
+    name: "RocketScooter AI",
+    youtubeHandle: "@RocketScooterAI",
+    platform: "tradovate",
+    isLive: false,
+  },
+  {
     id: "patrick-wieland",
     name: "Patrick Wieland",
     youtubeHandle: "@PatrickWieland",

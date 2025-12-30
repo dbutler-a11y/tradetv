@@ -1,14 +1,66 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { StreamCard, StreamData } from "./StreamCard";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
-import { TrendingUp, Clock, Users, Flame, RefreshCw, Wifi, WifiOff } from "lucide-react";
+import { TrendingUp, Clock, Users, Flame, RefreshCw, Wifi, WifiOff, Star } from "lucide-react";
 import { useYouTubeStreams } from "@/hooks/useYouTubeStreams";
 import { CopyTraderModal } from "@/components/modals/CopyTraderModal";
 import type { YouTubeVideo } from "@/lib/youtube/client";
+
+// Hook to fetch monitored channels
+function useMonitoredChannels() {
+  const [channels, setChannels] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [liveCount, setLiveCount] = useState(0);
+
+  const fetchChannels = useCallback(async () => {
+    try {
+      setLoading(true);
+      const response = await fetch("/api/youtube/monitored");
+      const data = await response.json();
+      setChannels(data.channels || []);
+      setLiveCount(data.liveCount || 0);
+    } catch (error) {
+      console.error("Failed to fetch monitored channels:", error);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchChannels();
+    // Refresh every 5 minutes
+    const interval = setInterval(fetchChannels, 300000);
+    return () => clearInterval(interval);
+  }, [fetchChannels]);
+
+  return { channels, loading, liveCount, refresh: fetchChannels };
+}
+
+// Convert monitored channel to StreamData format
+function monitoredToStreamData(channel: any): StreamData {
+  return {
+    id: channel.streamId || channel.id,
+    traderId: channel.youtubeChannelId || channel.id,
+    traderName: channel.channelTitle || channel.name,
+    traderAvatar: undefined,
+    verificationTier: "ELITE", // Monitored channels get elite badge
+    title: channel.title || `${channel.name} Live Stream`,
+    thumbnailUrl: channel.thumbnailUrl,
+    viewerCount: channel.viewerCount || 0,
+    copierCount: 0,
+    isLive: channel.isLive,
+    category: "Futures",
+    instruments: ["ES", "NQ"],
+    winRate: undefined,
+    todayPnl: undefined,
+    youtubeVideoId: channel.streamId,
+    isMonitored: true, // Flag to show special badge
+  };
+}
 
 // Demo data - used as fallback when YouTube API is not configured
 const demoStreams: StreamData[] = [
@@ -124,6 +176,24 @@ const sortOptions = [
   { id: "recent", name: "Recently Started", icon: Clock },
 ];
 
+// Calculate time until midnight Pacific Time
+function getTimeUntilReset(): string {
+  const now = new Date();
+  // Get midnight PT (Pacific Time)
+  const pt = new Date(now.toLocaleString("en-US", { timeZone: "America/Los_Angeles" }));
+  const midnight = new Date(pt);
+  midnight.setHours(24, 0, 0, 0);
+
+  const diffMs = midnight.getTime() - pt.getTime();
+  const hours = Math.floor(diffMs / (1000 * 60 * 60));
+  const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  }
+  return `${minutes}m`;
+}
+
 interface StreamGridProps {
   title?: string;
   showFilters?: boolean;
@@ -196,7 +266,17 @@ export function StreamGrid({
     monthlyPnl?: number;
   } | null>(null);
 
+  // Fetch monitored channels (prioritized)
+  const {
+    channels: monitoredChannels,
+    loading: monitoredLoading,
+    liveCount: monitoredLiveCount,
+    refresh: refreshMonitored,
+  } = useMonitoredChannels();
+
   // Fetch real YouTube streams
+  // TESTING MODE: Reduced to 5 streams, 30-min refresh
+  // Quota: 100 units per search, ~48 calls/day = 4,800 units (very safe)
   const {
     streams: youtubeStreams,
     loading: youtubeLoading,
@@ -204,20 +284,33 @@ export function StreamGrid({
     refresh,
   } = useYouTubeStreams({
     query: searchQuery,
-    limit: maxStreams || 20,
+    limit: maxStreams || 5, // Reduced for testing
     autoRefresh: true,
-    refreshInterval: 120000, // 2 minutes
+    refreshInterval: 1800000, // 30 minutes for testing
   });
 
   // Decide which data source to use
-  const isLoading = useRealData && !useFallback ? youtubeLoading : false;
+  const isLoading = useRealData && !useFallback ? (youtubeLoading && monitoredLoading) : false;
 
   // Convert YouTube data to StreamData format
   const realStreams: StreamData[] = youtubeStreams.map(youtubeToStreamData);
 
-  // Use real data if available, otherwise fallback to demo
-  const sourceStreams = useRealData && !useFallback && realStreams.length > 0
-    ? realStreams
+  // Convert monitored channels to StreamData (only live ones)
+  const monitoredStreams: StreamData[] = monitoredChannels
+    .filter(ch => ch.isLive)
+    .map(monitoredToStreamData);
+
+  // Combine: monitored channels first (if live), then YouTube search results
+  // Remove duplicates (if a monitored channel appears in search results)
+  const monitoredIds = new Set(monitoredStreams.map(s => s.youtubeVideoId));
+  const uniqueYouTubeStreams = realStreams.filter(s => !monitoredIds.has(s.youtubeVideoId));
+
+  // Combined streams: monitored first, then others
+  const combinedStreams = [...monitoredStreams, ...uniqueYouTubeStreams];
+
+  // Use combined data if available, otherwise fallback to demo
+  const sourceStreams = useRealData && !useFallback && combinedStreams.length > 0
+    ? combinedStreams
     : demoStreams;
 
   // Filter and sort streams
@@ -226,8 +319,14 @@ export function StreamGrid({
     return stream.category.toLowerCase() === activeCategory;
   });
 
-  // Sort streams
+  // Sort streams (but keep monitored at top)
   filteredStreams = [...filteredStreams].sort((a, b) => {
+    // Monitored streams always come first
+    const aMonitored = (a as any).isMonitored ? 1 : 0;
+    const bMonitored = (b as any).isMonitored ? 1 : 0;
+    if (aMonitored !== bMonitored) return bMonitored - aMonitored;
+
+    // Then sort by selected criteria
     switch (activeSort) {
       case "viewers":
         return b.viewerCount - a.viewerCount;
@@ -260,10 +359,32 @@ export function StreamGrid({
   };
 
   // Show whether we're using real or demo data
-  const usingRealData = useRealData && !useFallback && realStreams.length > 0;
+  const usingRealData = useRealData && !useFallback && combinedStreams.length > 0;
+  const isQuotaExceeded = youtubeError?.includes("quota");
+
+  // Combined refresh function
+  const handleRefresh = () => {
+    refresh();
+    refreshMonitored();
+  };
 
   return (
     <div className="space-y-4">
+      {/* Quota exceeded banner */}
+      {isQuotaExceeded && (
+        <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3 flex items-center gap-3">
+          <WifiOff className="w-5 h-5 text-yellow-500 shrink-0" />
+          <div className="flex-1">
+            <p className="text-sm font-medium text-yellow-600 dark:text-yellow-400">
+              YouTube API Quota Exceeded
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Showing demo data. Quota resets at midnight Pacific Time (~{getTimeUntilReset()}).
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
@@ -278,6 +399,11 @@ export function StreamGrid({
                 <Wifi className="w-3 h-3 text-green-500" />
                 Live
               </>
+            ) : isQuotaExceeded ? (
+              <>
+                <WifiOff className="w-3 h-3 text-yellow-500" />
+                Quota Exceeded
+              </>
             ) : (
               <>
                 <WifiOff className="w-3 h-3 text-yellow-500" />
@@ -289,16 +415,23 @@ export function StreamGrid({
 
         {showFilters && (
           <div className="flex items-center gap-2">
+            {/* Monitored channels indicator */}
+            {monitoredLiveCount > 0 && (
+              <span className="flex items-center gap-1 text-xs bg-primary/10 text-primary px-2 py-1 rounded-full">
+                <Star className="w-3 h-3" />
+                {monitoredLiveCount} tracked live
+              </span>
+            )}
             {/* Refresh button */}
             {useRealData && (
               <Button
                 variant="ghost"
                 size="icon"
                 className="h-8 w-8"
-                onClick={() => refresh()}
-                disabled={youtubeLoading}
+                onClick={handleRefresh}
+                disabled={youtubeLoading || monitoredLoading}
               >
-                <RefreshCw className={`w-4 h-4 ${youtubeLoading ? "animate-spin" : ""}`} />
+                <RefreshCw className={`w-4 h-4 ${(youtubeLoading || monitoredLoading) ? "animate-spin" : ""}`} />
               </Button>
             )}
             {/* Sort Dropdown */}

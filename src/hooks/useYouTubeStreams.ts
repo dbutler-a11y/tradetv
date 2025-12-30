@@ -21,7 +21,7 @@ export function useYouTubeStreams({
   query = "",
   limit = 20,
   autoRefresh = true,
-  refreshInterval = 60000, // 1 minute default
+  refreshInterval = 300000, // 5 minutes default (was 1 min - too aggressive for quota)
 }: UseYouTubeStreamsOptions = {}): UseYouTubeStreamsResult {
   const [streams, setStreams] = useState<YouTubeVideo[]>([]);
   const [loading, setLoading] = useState(true);

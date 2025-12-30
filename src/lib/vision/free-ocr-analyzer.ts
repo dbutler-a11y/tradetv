@@ -45,6 +45,18 @@ const PNL_PATTERNS = [
 ];
 
 /**
+ * Fetch image from URL and convert to buffer
+ */
+async function fetchImageAsBuffer(url: string): Promise<Buffer> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch image: ${response.statusText}`);
+  }
+  const arrayBuffer = await response.arrayBuffer();
+  return Buffer.from(arrayBuffer);
+}
+
+/**
  * Analyze screenshot using Tesseract.js OCR
  * This runs in the browser or Node.js
  */
@@ -55,13 +67,33 @@ export async function analyzeWithFreeOCR(
   const { language = "eng", confidenceThreshold = 60, platformHint } = config;
 
   try {
+    // If imageSource is a URL, fetch it first
+    let imageBuffer: Buffer;
+    if (typeof imageSource === "string" && imageSource.startsWith("http")) {
+      console.log("[OCR] Fetching image from URL:", imageSource.slice(0, 50) + "...");
+      imageBuffer = await fetchImageAsBuffer(imageSource);
+      console.log("[OCR] Image fetched, size:", imageBuffer.length, "bytes");
+    } else if (typeof imageSource === "string") {
+      // Assume base64 or file path
+      imageBuffer = Buffer.from(imageSource, "base64");
+    } else {
+      imageBuffer = imageSource;
+    }
+
     // Dynamic import Tesseract.js
+    console.log("[OCR] Loading Tesseract.js...");
     const Tesseract = await import("tesseract.js");
 
-    // Run OCR
-    const result = await Tesseract.recognize(imageSource, language, {
-      logger: () => {}, // Suppress progress logs
+    // Run OCR with timeout protection
+    console.log("[OCR] Running OCR analysis...");
+    const result = await Tesseract.recognize(imageBuffer, language, {
+      logger: (m: { status: string; progress: number }) => {
+        if (m.status === "recognizing text") {
+          console.log(`[OCR] Progress: ${Math.round(m.progress * 100)}%`);
+        }
+      },
     });
+    console.log("[OCR] Analysis complete");
 
     const text = result.data.text;
     const confidence = result.data.confidence;

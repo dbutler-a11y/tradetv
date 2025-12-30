@@ -29,6 +29,7 @@ export interface StreamData {
   winRate?: number;
   todayPnl?: number;
   youtubeVideoId?: string;
+  isMonitored?: boolean; // Flag for tracked/prioritized channels
 }
 
 interface StreamCardProps {
@@ -78,6 +79,14 @@ export function StreamCard({ stream, variant = "default", onCopy }: StreamCardPr
             <div className="absolute top-2 left-2 flex items-center gap-1.5 px-2 py-1 bg-red-600 rounded text-xs font-semibold text-white">
               <span className="w-2 h-2 bg-white rounded-full live-pulse" />
               LIVE
+            </div>
+          )}
+
+          {/* Tracked/Monitored Badge */}
+          {stream.isMonitored && (
+            <div className="absolute top-2 right-2 flex items-center gap-1 px-2 py-1 bg-primary rounded text-xs font-semibold text-primary-foreground">
+              <Star className="w-3 h-3" />
+              TRACKED
             </div>
           )}
 

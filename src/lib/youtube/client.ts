@@ -16,6 +16,7 @@ export interface YouTubeVideo {
   liveBroadcastContent: "live" | "upcoming" | "none";
   viewCount?: number;
   likeCount?: number;
+  concurrentViewers?: number; // For live streams
 }
 
 export interface YouTubeLiveStream {
@@ -128,6 +129,9 @@ class YouTubeClient {
     }
 
     const item = data.items[0];
+    const isLive = item.snippet.liveBroadcastContent === "live";
+    const liveDetails = item.liveStreamingDetails;
+
     return {
       id: item.id,
       title: item.snippet.title,
@@ -137,8 +141,13 @@ class YouTubeClient {
       thumbnailUrl: item.snippet.thumbnails?.high?.url || item.snippet.thumbnails?.default?.url,
       publishedAt: item.snippet.publishedAt,
       liveBroadcastContent: item.snippet.liveBroadcastContent,
-      viewCount: parseInt(item.statistics?.viewCount || "0"),
+      viewCount: isLive && liveDetails?.concurrentViewers
+        ? parseInt(liveDetails.concurrentViewers)
+        : parseInt(item.statistics?.viewCount || "0"),
       likeCount: parseInt(item.statistics?.likeCount || "0"),
+      concurrentViewers: liveDetails?.concurrentViewers
+        ? parseInt(liveDetails.concurrentViewers)
+        : undefined,
     };
   }
 
@@ -271,34 +280,41 @@ class YouTubeClient {
 
   /**
    * Search for trading-related live streams
+   * OPTIMIZED: Uses single query to save quota (100 units vs 500)
    */
   async searchTradingStreams(maxResults: number = 20): Promise<YouTubeVideo[]> {
-    const queries = [
-      "live trading futures",
-      "live day trading",
-      "live forex trading",
-      "live crypto trading",
-      "ES NQ live trading",
-    ];
+    // Use single comprehensive query to save quota
+    // Previous version used 5 queries = 500 units per call!
+    // Now uses 1 query = 100 units per call
+    const query = "live trading futures day trading forex crypto";
 
-    const allResults: YouTubeVideo[] = [];
-    const seenIds = new Set<string>();
-
-    for (const query of queries) {
-      try {
-        const results = await this.searchLiveStreams(query, Math.ceil(maxResults / queries.length));
-        for (const result of results) {
-          if (!seenIds.has(result.id)) {
-            seenIds.add(result.id);
-            allResults.push(result);
-          }
-        }
-      } catch (error) {
-        console.error(`Error searching for "${query}":`, error);
+    try {
+      return await this.searchLiveStreams(query, maxResults);
+    } catch (error: any) {
+      // Re-throw quota errors so they're visible
+      if (error.message?.includes("quota")) {
+        throw new Error("YouTube API quota exceeded. Quota resets at midnight Pacific Time.");
       }
+      console.error("Error searching trading streams:", error);
+      throw error;
     }
+  }
 
-    return allResults.slice(0, maxResults);
+  /**
+   * Check if API key is configured and valid
+   */
+  isConfigured(): boolean {
+    return Boolean(this.apiKey);
+  }
+
+  /**
+   * Get API key status (for debugging)
+   */
+  getStatus(): { configured: boolean; keyPrefix: string } {
+    return {
+      configured: Boolean(this.apiKey),
+      keyPrefix: this.apiKey ? this.apiKey.slice(0, 10) + "..." : "not set",
+    };
   }
 }
 
